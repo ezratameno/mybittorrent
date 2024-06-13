@@ -12,11 +12,18 @@ import (
 //	It is used in torrent files and in communication between trackers and peers.
 func decodeBencode(bencodedString string) (interface{}, error) {
 
-	if unicode.IsDigit(rune(bencodedString[0])) {
+	switch {
+	case unicode.IsDigit(rune(bencodedString[0])):
 		return decodeString(bencodedString)
-	} else {
+
+	case strings.HasPrefix(bencodedString, "i"):
+		return decodeInt(bencodedString)
+
+	default:
 		return "", fmt.Errorf("only strings are supported at the moment")
+
 	}
+
 }
 
 // Example:
@@ -39,4 +46,13 @@ func decodeString(bencodedString string) (string, error) {
 	stringContent := bencodedString[startOfContentIndex : stringLen+startOfContentIndex]
 	return stringContent, nil
 
+}
+
+// format - i<number>e
+func decodeInt(bencodedString string) (int, error) {
+
+	bencodedString = strings.TrimPrefix(bencodedString, "i")
+	bencodedString = strings.TrimSuffix(bencodedString, "e")
+
+	return strconv.Atoi(bencodedString)
 }

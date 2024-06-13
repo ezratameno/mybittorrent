@@ -17,3 +17,13 @@ func TestDecodeString(t *testing.T) {
 	require.Equal(t, "hello12345", res)
 
 }
+
+func TestDecodeInt(t *testing.T) {
+	res, err := decodeInt("i52e")
+	require.NoError(t, err)
+	require.Equal(t, 52, res)
+
+	res, err = decodeInt("i-52e")
+	require.NoError(t, err)
+	require.Equal(t, -52, res)
+}
