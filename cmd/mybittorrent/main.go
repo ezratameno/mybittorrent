@@ -34,6 +34,8 @@ func run() error {
 
 		decoded, err := decodeBencode(bencodedValue)
 		if err != nil {
+
+			fmt.Println("bencodedValue", bencodedValue)
 			return fmt.Errorf("decode error: %w", err)
 		}
 
