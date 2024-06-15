@@ -113,7 +113,7 @@ func decodeList(bencodedString string) ([]any, int, error) {
 	for len(bencodedString) > 0 {
 		switch bencodeType(bencodedString) {
 		case typeString:
-			fmt.Println("string: ", bencodedString)
+			// fmt.Println("string: ", bencodedString)
 
 			str, lenStr, err := decodeString(bencodedString)
 			if err != nil {
@@ -127,7 +127,7 @@ func decodeList(bencodedString string) ([]any, int, error) {
 			listLen += lenStr
 
 		case typeInt:
-			fmt.Println("int: ", bencodedString)
+			// fmt.Println("int: ", bencodedString)
 
 			intVal, intLen, err := decodeInt(bencodedString)
 			if err != nil {
@@ -141,7 +141,7 @@ func decodeList(bencodedString string) ([]any, int, error) {
 
 		case typeList:
 
-			fmt.Println("list: ", bencodedString)
+			// fmt.Println("list: ", bencodedString)
 
 			list, len, err := decodeList(bencodedString)
 			if err != nil {
@@ -153,8 +153,6 @@ func decodeList(bencodedString string) ([]any, int, error) {
 			res = append(res, list)
 
 			bencodedString = bencodedString[len:]
-			fmt.Println("list", list)
-			fmt.Println("list len", len)
 
 		default:
 			return nil, 0, fmt.Errorf("unknown type")
