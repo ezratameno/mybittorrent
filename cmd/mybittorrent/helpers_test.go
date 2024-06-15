@@ -9,42 +9,49 @@ import (
 
 func TestDecodeString(t *testing.T) {
 
-	res, err := decodeString("5:hello")
+	res, lenStr, err := decodeString("5:hello")
 	require.NoError(t, err)
 	require.Equal(t, "hello", res)
+	require.Equal(t, 7, lenStr)
 
-	res, err = decodeString("10:hello12345")
+	res, lenStr, err = decodeString("10:hello12345")
 	require.NoError(t, err)
 	require.Equal(t, "hello12345", res)
+	require.Equal(t, 13, lenStr)
 
 }
 
 func TestDecodeInt(t *testing.T) {
-	res, err := decodeInt("i52e")
+	res, resLen, err := decodeInt("i52e")
 	require.NoError(t, err)
 	require.Equal(t, 52, res)
+	require.Equal(t, 4, resLen)
 
-	res, err = decodeInt("i-52e")
+	res, resLen, err = decodeInt("i-52e")
 	require.NoError(t, err)
-	require.Equal(t, -52, res)
+	require.Equal(t, 5, resLen)
 }
 
 func TestNumDigits(t *testing.T) {
 
 	require.Equal(t, 3, numDigits(100))
 	require.Equal(t, 1, numDigits(1))
+	require.Equal(t, 3, numDigits(-100))
 
 }
 
 func TestDecodeList(t *testing.T) {
-	res, err := decodeList("l5:helloi52ee")
+	res, resLen, err := decodeList("l5:helloi52ee")
 	require.NoError(t, err)
+
+	fmt.Println(resLen)
 
 	require.Equal(t, []any{"hello", 52}, res)
 
-	res, err = decodeList("lli673e10:strawberryee")
+	res, resLen, err = decodeList("lli673e10:strawberryee")
 	require.NoError(t, err)
+	fmt.Println(resLen)
 
-	fmt.Println(res)
+	fmt.Printf("res :%+v\n", res)
 
 }
