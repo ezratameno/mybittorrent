@@ -52,6 +52,27 @@ func TestDecodeList(t *testing.T) {
 	require.NoError(t, err)
 	fmt.Println(resLen)
 
+	require.Equal(t, []any{[]any{673, "strawberry"}}, res)
+
+	res, resLen, err = decodeList("lli4eei5ee")
+	require.NoError(t, err)
+	fmt.Println(resLen)
+
+	require.Equal(t, []any{[]any{4}, 5}, res)
+
 	fmt.Printf("res :%+v\n", res)
 
+}
+
+func TestXxx(t *testing.T) {
+	index, err := findEndOfList("i4eei5ee")
+	require.NoError(t, err)
+
+	require.Equal(t, 3, index)
+
+	index, err = findEndOfList("5:helloi52ee")
+	require.NoError(t, err)
+	fmt.Println(index)
+
+	require.Equal(t, 11, index)
 }

@@ -25,7 +25,6 @@ func bencodeType(bencodedString string) int {
 	case strings.HasPrefix(bencodedString, "l"):
 		return typeList
 	default:
-		fmt.Println("bencodedString", bencodedString)
 		return typeUnknown
 
 	}
@@ -107,8 +106,9 @@ func decodeList(bencodedString string) ([]any, int, error) {
 
 	res := make([]any, 0)
 	listLen := 2
-	bencodedString = strings.TrimPrefix(bencodedString, "l")
-	bencodedString = strings.TrimSuffix(bencodedString, "e")
+	// bencodedString = strings.TrimPrefix(bencodedString, "l")
+
+	// bencodedString = strings.TrimSuffix(bencodedString, "e")
 
 	for len(bencodedString) > 0 {
 		switch bencodeType(bencodedString) {
@@ -143,18 +143,38 @@ func decodeList(bencodedString string) ([]any, int, error) {
 
 			// fmt.Println("list: ", bencodedString)
 
-			list, len, err := decodeList(bencodedString)
+			bencodedString = strings.TrimPrefix(bencodedString, "l")
+
+			// TODO: find the end index of the list
+			listEnd, err := findEndOfList(bencodedString)
+			if err != nil {
+				return nil, 0, err
+			}
+
+			fmt.Println("listEnd:", listEnd)
+
+			fmt.Println("bencodedString before:", bencodedString)
+
+			fmt.Println("bencodedString after:", bencodedString[:listEnd])
+
+			list, len, err := decodeList(bencodedString[:listEnd])
 			if err != nil {
 				return nil, 0, err
 			}
 
 			listLen += len
 
-			res = append(res, list)
+			res = append(res, list...)
 
-			bencodedString = bencodedString[len:]
+			bencodedString = bencodedString[listEnd:]
 
 		default:
+
+			// end of list
+			if bencodedString == "e" {
+				return res, listLen, nil
+			}
+
 			return nil, 0, fmt.Errorf("unknown type")
 
 		}
@@ -175,4 +195,41 @@ func numDigits(i int) int {
 	}
 
 	return count
+}
+
+// findEndOfList returns the end index of the first list.
+func findEndOfList(bencodedString string) (int, error) {
+
+	var index int
+	for len(bencodedString) > 0 {
+		switch bencodeType(bencodedString) {
+		case typeString:
+
+			_, lenStr, err := decodeString(bencodedString)
+			if err != nil {
+				return 0, err
+			}
+
+			// advance the string to the end of the string
+			bencodedString = bencodedString[lenStr:]
+			index += lenStr
+
+		case typeInt:
+
+			_, intLen, err := decodeInt(bencodedString)
+			if err != nil {
+				return 0, err
+			}
+
+			bencodedString = bencodedString[intLen:]
+			index += intLen
+
+		default:
+
+			return index, nil
+
+		}
+	}
+
+	return index, nil
 }
