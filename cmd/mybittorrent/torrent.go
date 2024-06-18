@@ -28,8 +28,8 @@ type Info struct {
 	// number of bytes in each piece
 	PieceLength int64
 
-	// concatenated SHA-1 hashes of each piece
-	Pieces string
+	// concatenated SHA-1 hashes of each piece, 20 bytes each
+	Pieces []string
 }
 
 // NewTorrentFile builds the torrent file from the decoded content of the torrent file
@@ -73,10 +73,27 @@ func NewTorrentFile(filePath string) (*TorrentFile, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	sha := hash.Sum(nil)
 
 	// fmt.Println("sha: ", sha)
+
+	// get the pieces hash
+
+	var pices []string
+	var i int
+	for i < len(pieces) {
+		hash := sha1.New()
+
+		_, err := hash.Write([]byte(pieces[i : i+20]))
+		if err != nil {
+			return nil, err
+		}
+
+		pieceSha := fmt.Sprintf("%x", hash.Sum(nil))
+		pices = append(pices, pieceSha)
+		fmt.Println(pieceSha)
+		i += 20
+	}
 
 	file := &TorrentFile{
 
@@ -86,7 +103,7 @@ func NewTorrentFile(filePath string) (*TorrentFile, error) {
 			Length:      length,
 			Name:        name,
 			PieceLength: pieceLength,
-			Pieces:      pieces,
+			Pieces:      pices,
 		},
 		Hash: fmt.Sprintf("%x", sha),
 	}
