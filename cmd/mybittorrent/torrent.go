@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha1"
 	"fmt"
 	"os"
 
@@ -14,6 +15,7 @@ type TorrentFile struct {
 	Announce string
 
 	Info Info
+	Hash string
 }
 
 type Info struct {
@@ -57,19 +59,37 @@ func NewTorrentFile(filePath string) (*TorrentFile, error) {
 		return nil, fmt.Errorf("wrong format, info not present")
 	}
 
-	// validate that info is a map
+	// TODO: validate that info is a map
 	infoMap := decodedMap["info"].(map[string]any)
+	length := infoMap["length"].(int64)
+	name := infoMap["name"].(string)
+	pieceLength := infoMap["piece length"].(int64)
+	pieces := infoMap["pieces"].(string)
+
+	// calculate the sha of the info dictionary
+
+	hash := sha1.New()
+
+	err = bencode.Marshal(hash, infoMap)
+	if err != nil {
+		return nil, err
+	}
+
+	sha := hash.Sum(nil)
+
+	// fmt.Println("sha: ", sha)
 
 	file := &TorrentFile{
 
 		// TODO: improve this
 		Announce: decodedMap["announce"].(string),
 		Info: Info{
-			Length:      infoMap["length"].(int64),
-			Name:        infoMap["name"].(string),
-			PieceLength: infoMap["piece length"].(int64),
-			Pieces:      infoMap["pieces"].(string),
+			Length:      length,
+			Name:        name,
+			PieceLength: pieceLength,
+			Pieces:      pieces,
 		},
+		Hash: fmt.Sprintf("%x", sha),
 	}
 
 	return file, nil
