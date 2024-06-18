@@ -21,6 +21,7 @@ func main() {
 
 const (
 	commandDecode = "decode"
+	commandInfo   = "info"
 )
 
 func run() error {
@@ -34,20 +35,40 @@ func run() error {
 
 		bencodedValue := os.Args[2]
 
-		buf := bytes.NewReader([]byte(bencodedValue))
+		reader := bytes.NewReader([]byte(bencodedValue))
 
-		decoded, err := bencode.Decode(buf)
+		decoded, err := bencode.Decode(reader)
 		if err != nil {
-
-			// fmt.Println("bencodedValue", bencodedValue)
 			return fmt.Errorf("decode error: %w", err)
 		}
 
 		jsonOutput, _ := json.Marshal(decoded)
 		fmt.Println(string(jsonOutput))
+
+	case commandInfo:
+		filePath := os.Args[2]
+
+		err := InfoCmd(filePath)
+		if err != nil {
+			return err
+		}
+
 	default:
 		return fmt.Errorf("unknown command %s", command)
 	}
+
+	return nil
+}
+
+func InfoCmd(filePath string) error {
+
+	file, err := NewTorrentFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Tracker URL: %+v\n", file.Announce)
+	fmt.Printf("Length: %+v\n", file.Info.Length)
 
 	return nil
 }
