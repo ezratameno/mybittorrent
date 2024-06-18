@@ -3,10 +3,12 @@ package main
 import (
 	// Uncomment this line to pass the first stage
 	// "encoding/json"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
-	// bencode "github.com/jackpal/bencode-go" // Available if you need it!
+
+	bencode "github.com/jackpal/bencode-go" // Available if you need it!
 )
 
 func main() {
@@ -32,7 +34,9 @@ func run() error {
 
 		bencodedValue := os.Args[2]
 
-		decoded, err := decodeBencode(bencodedValue)
+		buf := bytes.NewReader([]byte(bencodedValue))
+
+		decoded, err := bencode.Decode(buf)
 		if err != nil {
 
 			// fmt.Println("bencodedValue", bencodedValue)
