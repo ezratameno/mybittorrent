@@ -66,10 +66,9 @@ func NewTorrentFile(filePath string) (*TorrentFile, error) {
 	pieceLength := infoMap["piece length"].(int64)
 	pieces := infoMap["pieces"].(string)
 
-	// calculate the sha of the info dictionary
+	// calculate the sha of the encoded info dictionary
 
 	hash := sha1.New()
-
 	err = bencode.Marshal(hash, infoMap)
 	if err != nil {
 		return nil, err
