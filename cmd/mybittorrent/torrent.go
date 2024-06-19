@@ -123,12 +123,7 @@ type DiscoverPeersResponse struct {
 	// A string, which contains list of peers that your client can connect to.
 	// Each peer is represented using 6 bytes.
 	//  The first 4 bytes are the peer's IP address and the last 2 bytes are the peer's port number.
-	peers []Peer
-}
-
-type Peer struct {
-	port   uint16
-	ipAddr string
+	peers []*Peer
 }
 
 func (tf *TorrentFile) DiscoverPeers(ctx context.Context) (*DiscoverPeersResponse, error) {
@@ -194,8 +189,13 @@ func (tf *TorrentFile) DiscoverPeers(ctx context.Context) (*DiscoverPeersRespons
 
 	decodedRespMap := decodedResp.(map[string]any)
 
+	if _, ok := decodedRespMap["interval"]; !ok {
+		// use mininterval if interval doesn't exist
+		decodedRespMap["interval"] = decodedRespMap["mininterval"]
+	}
+
 	if _, ok := decodedRespMap["interval"].(int64); !ok {
-		return nil, fmt.Errorf("expected interval to be a int64")
+		return nil, fmt.Errorf("expected interval to be a int64: %+v", decodedRespMap)
 	}
 
 	discoverResp := &DiscoverPeersResponse{
@@ -219,7 +219,7 @@ func (tf *TorrentFile) DiscoverPeers(ctx context.Context) (*DiscoverPeersRespons
 		}
 		port := binary.BigEndian.Uint16([]byte(peers[i+4 : i+6]))
 
-		discoverResp.peers = append(discoverResp.peers, Peer{
+		discoverResp.peers = append(discoverResp.peers, &Peer{
 			port:   port,
 			ipAddr: strings.TrimSuffix(buf.String(), "."),
 		})

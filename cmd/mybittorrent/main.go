@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	bencode "github.com/jackpal/bencode-go" // Available if you need it!
 )
@@ -21,9 +23,10 @@ func main() {
 }
 
 const (
-	commandDecode = "decode"
-	commandInfo   = "info"
-	commandPeers  = "peers"
+	commandDecode    = "decode"
+	commandInfo      = "info"
+	commandPeers     = "peers"
+	commandHandshake = "handshake"
 )
 
 func run() error {
@@ -59,6 +62,11 @@ func run() error {
 		filePath := os.Args[2]
 
 		return PeersCmd(filePath)
+
+	case commandHandshake:
+		filePath := os.Args[2]
+		peer := os.Args[3]
+		return HandshakeCmd(filePath, peer)
 
 	default:
 		return fmt.Errorf("unknown command %s", command)
@@ -103,5 +111,41 @@ func PeersCmd(filePath string) error {
 	for _, peer := range resp.peers {
 		fmt.Printf("%s:%d\n", peer.ipAddr, peer.port)
 	}
+	return nil
+}
+
+func HandshakeCmd(filePath string, peerInfo string) error {
+
+	file, err := NewTorrentFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	resp, err := file.DiscoverPeers(context.Background())
+	if err != nil {
+		return err
+	}
+
+	peerAddr := strings.Split(peerInfo, ":")[0]
+
+	peerPort, err := strconv.Atoi(strings.Split(peerInfo, ":")[1])
+	if err != nil {
+		return err
+	}
+
+	var desiredPeer *Peer
+	for _, peer := range resp.peers {
+		if peer.ipAddr == peerAddr && peer.port == uint16(peerPort) {
+			desiredPeer = peer
+			break
+		}
+	}
+
+	handshake, err := desiredPeer.Handshake(context.Background(), file.Info.InfoHash, []byte("00112233445566778899"))
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Peer ID: %x\n", string(handshake.PeerID))
 	return nil
 }
