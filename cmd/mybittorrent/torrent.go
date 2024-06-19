@@ -15,7 +15,6 @@ type TorrentFile struct {
 	Announce string
 
 	Info Info
-	Hash string
 }
 
 type Info struct {
@@ -29,7 +28,12 @@ type Info struct {
 	PieceLength int64
 
 	// concatenated SHA-1 hashes of each piece, 20 bytes each
-	Pieces []string
+	Pieces string
+
+	// unique identifier for a torrent file. It's used when talking to trackers or peers.
+	InfoHash string
+
+	PiecesHash []string
 }
 
 // NewTorrentFile builds the torrent file from the decoded content of the torrent file
@@ -73,25 +77,16 @@ func NewTorrentFile(filePath string) (*TorrentFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	sha := hash.Sum(nil)
+	infoHash := hash.Sum(nil)
 
 	// fmt.Println("sha: ", sha)
 
 	// get the pieces hash
 
-	var pices []string
+	var piecesHash []string
 	var i int
 	for i < len(pieces) {
-		hash := sha1.New()
-
-		_, err := hash.Write([]byte(pieces[i : i+20]))
-		if err != nil {
-			return nil, err
-		}
-
-		pieceSha := fmt.Sprintf("%x", hash.Sum(nil))
-		pices = append(pices, pieceSha)
-		fmt.Println(pieceSha)
+		piecesHash = append(piecesHash, fmt.Sprintf("%x", pieces[i:i+20]))
 		i += 20
 	}
 
@@ -103,9 +98,10 @@ func NewTorrentFile(filePath string) (*TorrentFile, error) {
 			Length:      length,
 			Name:        name,
 			PieceLength: pieceLength,
-			Pieces:      pices,
+			Pieces:      pieces,
+			InfoHash:    fmt.Sprintf("%x", infoHash),
+			PiecesHash:  piecesHash,
 		},
-		Hash: fmt.Sprintf("%x", sha),
 	}
 
 	return file, nil

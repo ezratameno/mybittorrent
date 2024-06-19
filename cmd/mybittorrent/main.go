@@ -69,9 +69,12 @@ func InfoCmd(filePath string) error {
 
 	fmt.Printf("Tracker URL: %+v\n", file.Announce)
 	fmt.Printf("Length: %+v\n", file.Info.Length)
-	fmt.Printf("Info Hash: %+v\n", file.Hash)
+	fmt.Printf("Info Hash: %+v\n", file.Info.InfoHash)
 	fmt.Printf("Piece Length: %+v\n", file.Info.PieceLength)
 	fmt.Printf("Piece Hashes:\n")
+	for _, pieceHash := range file.Info.PiecesHash {
+		fmt.Println(pieceHash)
+	}
 
 	return nil
 }
