@@ -4,6 +4,7 @@ import (
 	// Uncomment this line to pass the first stage
 	// "encoding/json"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -22,6 +23,7 @@ func main() {
 const (
 	commandDecode = "decode"
 	commandInfo   = "info"
+	commandPeers  = "peers"
 )
 
 func run() error {
@@ -53,6 +55,11 @@ func run() error {
 			return err
 		}
 
+	case commandPeers:
+		filePath := os.Args[2]
+
+		return PeersCmd(filePath)
+
 	default:
 		return fmt.Errorf("unknown command %s", command)
 	}
@@ -69,12 +76,32 @@ func InfoCmd(filePath string) error {
 
 	fmt.Printf("Tracker URL: %+v\n", file.Announce)
 	fmt.Printf("Length: %+v\n", file.Info.Length)
-	fmt.Printf("Info Hash: %+v\n", file.Info.InfoHash)
+
+	// info hash in hex
+	fmt.Printf("Info Hash: %x\n", file.Info.InfoHash)
 	fmt.Printf("Piece Length: %+v\n", file.Info.PieceLength)
 	fmt.Printf("Piece Hashes:\n")
 	for _, pieceHash := range file.Info.PiecesHash {
 		fmt.Println(pieceHash)
 	}
 
+	return nil
+}
+
+func PeersCmd(filePath string) error {
+
+	file, err := NewTorrentFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	resp, err := file.DiscoverPeers(context.Background())
+	if err != nil {
+		return err
+	}
+
+	for _, peer := range resp.peers {
+		fmt.Printf("%s:%d\n", peer.ipAddr, peer.port)
+	}
 	return nil
 }
