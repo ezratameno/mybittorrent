@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"strconv"
@@ -23,10 +24,11 @@ func main() {
 }
 
 const (
-	commandDecode    = "decode"
-	commandInfo      = "info"
-	commandPeers     = "peers"
-	commandHandshake = "handshake"
+	commandDecode        = "decode"
+	commandInfo          = "info"
+	commandPeers         = "peers"
+	commandHandshake     = "handshake"
+	commandDownloadPiece = "download_piece"
 )
 
 func run() error {
@@ -68,6 +70,8 @@ func run() error {
 		peer := os.Args[3]
 		return HandshakeCmd(filePath, peer)
 
+	case commandDownloadPiece:
+		return DownloadPieceCmd(os.Args[2:])
 	default:
 		return fmt.Errorf("unknown command %s", command)
 	}
@@ -141,11 +145,63 @@ func HandshakeCmd(filePath string, peerInfo string) error {
 		}
 	}
 
+	// Open a connection to the peer
+	err = desiredPeer.Connect()
+	if err != nil {
+		return err
+	}
+
+	defer desiredPeer.Close()
+
 	handshake, err := desiredPeer.Handshake(context.Background(), file.Info.InfoHash, []byte("00112233445566778899"))
 	if err != nil {
 		return err
 	}
 
 	fmt.Printf("Peer ID: %x\n", string(handshake.PeerID))
+	return nil
+}
+
+func DownloadPieceCmd(args []string) error {
+
+	fs := flag.NewFlagSet("download_piece", flag.ExitOnError)
+	pieceFile := fs.String("o", "", "path to where to save the piece")
+	fs.Parse(args)
+
+	_ = pieceFile
+
+	filePath := args[len(args)-2]
+	pieceNum, err := strconv.Atoi(args[len(args)-1])
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("filePath", filePath)
+
+	file, err := NewTorrentFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	resp, err := file.DiscoverPeers(context.Background())
+	if err != nil {
+		return err
+	}
+
+	// At this point all the peers contains all the pieces
+	desiredPeer := resp.peers[0]
+
+	// Open a connection to the peer
+	err = desiredPeer.Connect()
+	if err != nil {
+		return err
+	}
+
+	defer desiredPeer.Close()
+
+	_, err = desiredPeer.DownloadPiece(context.Background(), file, []byte("00112233445566778899"), pieceNum)
+	if err != nil {
+		return err
+	}
 	return nil
 }
