@@ -207,6 +207,8 @@ func (p *Peer) handleDownloadPiece(file *TorrentFile, pieceIndex int) ([]byte, e
 
 				// The length of the last piece can be less then the others
 				if i == int(numBlocks)-1 && file.Info.PieceLength%blockSize != 0 {
+
+					fmt.Println(`file.Info.PieceLength % blockSize:`, file.Info.PieceLength%blockSize)
 					length = uint32(file.Info.PieceLength % blockSize)
 				}
 
