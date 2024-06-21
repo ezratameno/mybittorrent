@@ -168,8 +168,6 @@ func DownloadPieceCmd(args []string) error {
 	pieceFile := fs.String("o", "", "path to where to save the piece")
 	fs.Parse(args)
 
-	_ = pieceFile
-
 	filePath := args[len(args)-2]
 	pieceNum, err := strconv.Atoi(args[len(args)-1])
 	if err != nil {
@@ -203,6 +201,8 @@ func DownloadPieceCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	fmt.Println("got piece !")
 
 	return os.WriteFile(*pieceFile, piece, 0755)
 }
