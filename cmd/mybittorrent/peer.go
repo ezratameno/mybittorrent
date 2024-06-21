@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -120,31 +121,41 @@ func (p *Peer) Handshake(ctx context.Context, infoHash []byte, peerID []byte) (*
 	return handshake, err
 }
 
-func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, peerID []byte, pieceIndex int) (*any, error) {
+func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, peerID []byte, pieceIndex int) ([]byte, error) {
 
 	_, err := p.Handshake(context.Background(), file.Info.InfoHash, peerID)
 	if err != nil {
 		return nil, err
 	}
 
-	go p.handleDownloadPiece(file, pieceIndex)
+	piece, err := p.handleDownloadPiece(file, pieceIndex)
+	if err != nil {
+		return nil, err
+	}
 
-	time.Sleep(100 * time.Second)
+	// validate the hash of the piece
 
-	// wait for bitfield message
+	expectedPieceHash := file.Info.PiecesHash[pieceIndex]
 
-	// send interested message
+	fmt.Println("expectedPieceHash", expectedPieceHash)
 
-	// wait for unchoke message
+	hash := sha1.New()
 
-	// Break the piece into blocks of 16 kiB (16 * 1024 bytes) and send a request message for each block
+	hash.Write(piece)
 
-	return nil, nil
+	fmt.Printf("piece sha: %x\n", hash.Sum(nil))
+	fmt.Println("file size", file.Info.Length)
+	fmt.Println("file PieceLength", file.Info.PieceLength)
+	fmt.Println("piece", len(piece))
+
+	return piece, nil
+
 }
 
-func (p *Peer) handleDownloadPiece(file *TorrentFile, pieceIndex int) error {
+func (p *Peer) handleDownloadPiece(file *TorrentFile, pieceIndex int) ([]byte, error) {
 	buf := make([]byte, blockSize*5)
 
+	var piece []byte
 	for {
 
 		size, err := p.conn.Read(buf)
@@ -153,12 +164,11 @@ func (p *Peer) handleDownloadPiece(file *TorrentFile, pieceIndex int) error {
 			if errors.Is(err, io.EOF) {
 
 				fmt.Println("eof")
-				return nil
+				return nil, nil
 
 			}
 
-			fmt.Println("err", err.Error())
-			return err
+			return nil, err
 		}
 
 		content := buf[:size]
@@ -187,7 +197,6 @@ func (p *Peer) handleDownloadPiece(file *TorrentFile, pieceIndex int) error {
 				numBlocks++
 			}
 			fmt.Printf("num of blocks in a piece: %d\n", numBlocks)
-
 			fmt.Println("piece length", file.Info.PieceLength)
 
 			for i := 0; i < int(numBlocks); i++ {
@@ -201,7 +210,7 @@ func (p *Peer) handleDownloadPiece(file *TorrentFile, pieceIndex int) error {
 					length = uint32(file.Info.PieceLength % blockSize)
 				}
 
-				fmt.Printf("begin: %d, block num: %d\n", begin, i)
+				// fmt.Printf("begin: %d, block num: %d\n", begin, i)
 				fmt.Printf("length: %d, block num: %d\n", length, i)
 
 				var b []byte
@@ -212,36 +221,41 @@ func (p *Peer) handleDownloadPiece(file *TorrentFile, pieceIndex int) error {
 				b = binary.BigEndian.AppendUint32(b, begin)
 				b = binary.BigEndian.AppendUint32(b, length)
 
-				fmt.Println(b)
-
 				// Send the request
 				_, err = p.conn.Write(b)
 				if err != nil {
 					fmt.Println("error:", err.Error())
 				}
-				fmt.Println("wrote data", i)
+				// fmt.Println("wrote data", i)
+
+				time.Sleep(100 * time.Millisecond)
 
 				// Read the response
-
-				d := make([]byte, length+13)
-				s, err := p.conn.Read(d)
+				// TODO: work on this part
+				resp := make([]byte, length+13)
+				respSize, err := io.ReadFull(p.conn, resp)
 				if err != nil {
 					fmt.Println("err", err.Error())
-
-					return err
+					return nil, err
 				}
 
-				resp := d[:s]
-				fmt.Println(resp)
+				resp = resp[:respSize]
+				// fmt.Println("resp:", resp)
 
 				respIndex := binary.BigEndian.Uint32(resp[5:9])
 				respBegin := binary.BigEndian.Uint32(resp[9:13])
-				respBlock := resp[14:]
-				_ = respBlock
+				respBlock := resp[13:]
+
+				fmt.Println("resp Length", binary.BigEndian.Uint32(resp[:5]))
 				fmt.Println("respIndex", respIndex)
 				fmt.Println("respBegin", respBegin)
+
+				piece = append(piece, respBlock...)
 				// fmt.Println("respBlock", respBlock)
 			}
+
+			// Finish getting all the blocks of the pieces
+			return piece, nil
 
 		default:
 			fmt.Println("size", size)

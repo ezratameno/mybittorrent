@@ -199,9 +199,10 @@ func DownloadPieceCmd(args []string) error {
 
 	defer desiredPeer.Close()
 
-	_, err = desiredPeer.DownloadPiece(context.Background(), file, []byte("00112233445566778899"), pieceNum)
+	piece, err := desiredPeer.DownloadPiece(context.Background(), file, []byte("00112233445566778899"), pieceNum)
 	if err != nil {
 		return err
 	}
-	return nil
+
+	return os.WriteFile(*pieceFile, piece, 0755)
 }
