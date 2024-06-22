@@ -55,11 +55,10 @@ func (p *Peer) Connect(infoHash []byte) error {
 
 	piecesBinRep := fmt.Sprintf("%b", buf[5:])
 	for i, pieceIndex := range piecesBinRep {
-		if pieceIndex == 1 {
+		if pieceIndex == '1' {
 			p.availablePiecesIndexes = append(p.availablePiecesIndexes, i)
 		}
 	}
-	fmt.Println("piecesBinRep", piecesBinRep)
 	return nil
 }
 
