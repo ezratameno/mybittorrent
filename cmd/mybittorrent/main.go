@@ -29,6 +29,7 @@ const (
 	commandPeers         = "peers"
 	commandHandshake     = "handshake"
 	commandDownloadPiece = "download_piece"
+	commandDownload      = "download"
 )
 
 func run() error {
@@ -72,6 +73,9 @@ func run() error {
 
 	case commandDownloadPiece:
 		return DownloadPieceCmd(os.Args[2:])
+
+	case commandDownload:
+		return DownloadCmd(os.Args[2:])
 	default:
 		return fmt.Errorf("unknown command %s", command)
 	}
@@ -205,4 +209,48 @@ func DownloadPieceCmd(args []string) error {
 	fmt.Println("got piece !")
 
 	return os.WriteFile(*pieceFile, piece, 0755)
+}
+
+func DownloadCmd(args []string) error {
+
+	fs := flag.NewFlagSet("download", flag.ExitOnError)
+	pathToFile := fs.String("o", "", "path to where to save the torrent file")
+	fs.Parse(args)
+
+	filePath := args[len(args)-1]
+
+	file, err := NewTorrentFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	resp, err := file.DiscoverPeers(context.Background())
+	if err != nil {
+		return err
+	}
+
+	// TODO: to imporve this find which peer has which piece
+	// At this point all the peers contains all the pieces
+	desiredPeer := resp.peers[0]
+
+	// Open a connection to the peer
+	err = desiredPeer.Connect()
+	if err != nil {
+		return err
+	}
+
+	defer desiredPeer.Close()
+
+	var fileContent []byte
+	for pieceIndex := range file.Info.PiecesHash {
+
+		piece, err := desiredPeer.DownloadPiece(context.Background(), file, []byte("00112233445566778899"), pieceIndex)
+		if err != nil {
+			return err
+		}
+
+		fileContent = append(fileContent, piece...)
+	}
+
+	return os.WriteFile(*pathToFile, fileContent, 0755)
 }

@@ -141,13 +141,16 @@ func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, peerID []by
 
 	hash := sha1.New()
 
-	hash.Write(piece)
+	_, err = hash.Write(piece)
+	if err != nil {
+		return nil, err
+	}
 
 	pieceHash := fmt.Sprintf("%x", hash.Sum(nil))
 
-	fmt.Println("pieceHash", pieceHash)
+	// fmt.Println("pieceHash", pieceHash)
 
-	fmt.Println("piece len", len(piece))
+	// fmt.Println("piece len", len(piece))
 
 	if pieceHash != expectedPieceHash {
 		return nil, errors.New("piece hash doesn't match expected hash")
@@ -209,8 +212,8 @@ func (p *Peer) handleDownloadPiece(file *TorrentFile, pieceIndex int) ([]byte, e
 			if pieceLen%blockSize != 0 {
 				numBlocks++
 			}
-			fmt.Printf("num of blocks in a piece: %d\n", numBlocks)
-			fmt.Println("piece length", pieceLen)
+			// fmt.Printf("num of blocks in a piece: %d\n", numBlocks)
+			// fmt.Println("piece length", pieceLen)
 
 			for i := 0; i < int(numBlocks); i++ {
 
@@ -228,25 +231,24 @@ func (p *Peer) handleDownloadPiece(file *TorrentFile, pieceIndex int) ([]byte, e
 				// fmt.Printf("begin: %d, block num: %d\n", begin, i)
 				fmt.Printf("length: %d, begin: %d, block num: %d\n", length, begin, i)
 
-				var b []byte
+				var request []byte
 
-				b = binary.BigEndian.AppendUint32(b, 13)
-				b = append(b, uint8(messageIDRequest))
-				b = binary.BigEndian.AppendUint32(b, index)
-				b = binary.BigEndian.AppendUint32(b, begin)
-				b = binary.BigEndian.AppendUint32(b, length)
+				request = binary.BigEndian.AppendUint32(request, 13)
+				request = append(request, uint8(messageIDRequest))
+				request = binary.BigEndian.AppendUint32(request, index)
+				request = binary.BigEndian.AppendUint32(request, begin)
+				request = binary.BigEndian.AppendUint32(request, length)
 
 				// Send the request
-				n, err := p.conn.Write(b)
+				_, err := p.conn.Write(request)
 				if err != nil {
-					return nil, fmt.Errorf("failed to write!: %w", err)
+					return nil, fmt.Errorf("failed to write: %w", err)
 				}
 
-				fmt.Printf("wrote: %d bytes\n", n)
+				// fmt.Printf("wrote: %d bytes\n", n)
 				// fmt.Println("wrote data", i)
 
 				// Read the response
-				// TODO: work on this part
 				resp := make([]byte, length+13)
 				var respSize int
 
