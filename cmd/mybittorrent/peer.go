@@ -17,6 +17,10 @@ type Peer struct {
 	ipAddr string
 	conn   net.Conn
 
+	handshake *Handshake
+
+	availablePiecesIndexes []int
+
 	// TODO: add chan that we pass the messages through him
 }
 
@@ -24,7 +28,7 @@ const (
 	blockSize = 16 * 1024
 )
 
-func (p *Peer) Connect() error {
+func (p *Peer) Connect(infoHash []byte) error {
 	addr := fmt.Sprintf("%s:%d", p.ipAddr, p.port)
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -32,6 +36,30 @@ func (p *Peer) Connect() error {
 	}
 
 	p.conn = conn
+
+	// unique identifier of our peer
+	peerID := []byte("00112233445566778899")
+	p.handshake, err = p.Handshake(context.Background(), infoHash, peerID)
+	if err != nil {
+		return err
+	}
+
+	// after handshake the peer will send a bitfield message telling us which pieces he has
+	buf := make([]byte, 1024)
+	size, err := p.conn.Read(buf)
+	if err != nil {
+		return fmt.Errorf("failed to read bitfield message: %w", err)
+	}
+
+	buf = buf[:size]
+
+	piecesBinRep := fmt.Sprintf("%b", buf[5:])
+	for i, pieceIndex := range piecesBinRep {
+		if pieceIndex == 1 {
+			p.availablePiecesIndexes = append(p.availablePiecesIndexes, i)
+		}
+	}
+	fmt.Println("piecesBinRep", piecesBinRep)
 	return nil
 }
 
@@ -121,12 +149,7 @@ func (p *Peer) Handshake(ctx context.Context, infoHash []byte, peerID []byte) (*
 	return handshake, err
 }
 
-func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, peerID []byte, pieceIndex int) ([]byte, error) {
-
-	_, err := p.Handshake(context.Background(), file.Info.InfoHash, peerID)
-	if err != nil {
-		return nil, err
-	}
+func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, pieceIndex int) ([]byte, error) {
 
 	piece, err := p.handleDownloadPiece(file, pieceIndex)
 	if err != nil {
@@ -137,7 +160,7 @@ func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, peerID []by
 
 	expectedPieceHash := file.Info.PiecesHash[pieceIndex]
 
-	fmt.Println("expectedPieceHash", expectedPieceHash)
+	fmt.Printf("expectedPieceHash: %s, piece index: %d\n", expectedPieceHash, pieceIndex)
 
 	hash := sha1.New()
 
@@ -161,6 +184,15 @@ func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, peerID []by
 }
 
 func (p *Peer) handleDownloadPiece(file *TorrentFile, pieceIndex int) ([]byte, error) {
+
+	// Send interested message to start
+	_, err := p.conn.Write([]byte{0, 0, 0, 1, messageIDInterested})
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Println("sent interested message")
+
 	buf := make([]byte, blockSize*5)
 
 	var piece []byte
@@ -173,7 +205,6 @@ func (p *Peer) handleDownloadPiece(file *TorrentFile, pieceIndex int) ([]byte, e
 
 				fmt.Println("eof")
 				return nil, nil
-
 			}
 
 			return nil, err
@@ -181,16 +212,15 @@ func (p *Peer) handleDownloadPiece(file *TorrentFile, pieceIndex int) ([]byte, e
 
 		content := buf[:size]
 
-		// fmt.Println("content: ", content)
+		fmt.Println("content:", content)
+
+		// http://www.kristenwidman.com/blog/71/how-to-write-a-bittorrent-client-part-2/#:~:text=Bitfield%20messages%20are%20optional%20and,pieces%20that%20a%20peer%20has.
+		// Can be because of the choke message
+		if len(content) < 5 {
+			continue
+		}
 
 		switch messageID := content[4]; messageID {
-
-		// send interested message
-		case messageIDBitfield:
-
-			// TODO: improve this
-			p.conn.Write([]byte{0, 0, 0, 1, messageIDInterested})
-			fmt.Println("sent msg")
 
 		case messageIDUnchoke:
 
@@ -229,7 +259,7 @@ func (p *Peer) handleDownloadPiece(file *TorrentFile, pieceIndex int) ([]byte, e
 				}
 
 				// fmt.Printf("begin: %d, block num: %d\n", begin, i)
-				fmt.Printf("length: %d, begin: %d, block num: %d\n", length, begin, i)
+				// fmt.Printf("length: %d, begin: %d, block num: %d\n", length, begin, i)
 
 				var request []byte
 
@@ -257,22 +287,21 @@ func (p *Peer) handleDownloadPiece(file *TorrentFile, pieceIndex int) ([]byte, e
 					return err
 				})
 				if err != nil {
-					fmt.Println("read err:", err.Error())
 					return nil, err
 				}
 
-				fmt.Println("respSize", respSize)
+				// fmt.Println("respSize", respSize)
 
 				resp = resp[:respSize]
 				// fmt.Println("resp:", resp)
 
-				respIndex := binary.BigEndian.Uint32(resp[5:9])
-				respBegin := binary.BigEndian.Uint32(resp[9:13])
+				// respIndex := binary.BigEndian.Uint32(resp[5:9])
+				// respBegin := binary.BigEndian.Uint32(resp[9:13])
 				respBlock := resp[13:]
 
-				fmt.Println("resp Length", binary.BigEndian.Uint32(resp[:5]))
-				fmt.Println("respIndex", respIndex)
-				fmt.Println("respBegin", respBegin)
+				// fmt.Println("resp Length", binary.BigEndian.Uint32(resp[:5]))
+				// fmt.Println("respIndex", respIndex)
+				// fmt.Println("respBegin", respBegin)
 
 				piece = append(piece, respBlock...)
 				// fmt.Println("respBlock", respBlock)

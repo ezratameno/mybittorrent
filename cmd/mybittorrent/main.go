@@ -150,19 +150,14 @@ func HandshakeCmd(filePath string, peerInfo string) error {
 	}
 
 	// Open a connection to the peer
-	err = desiredPeer.Connect()
+	err = desiredPeer.Connect(file.Info.InfoHash)
 	if err != nil {
 		return err
 	}
 
 	defer desiredPeer.Close()
 
-	handshake, err := desiredPeer.Handshake(context.Background(), file.Info.InfoHash, []byte("00112233445566778899"))
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("Peer ID: %x\n", string(handshake.PeerID))
+	fmt.Printf("Peer ID: %x\n", string(desiredPeer.handshake.PeerID))
 	return nil
 }
 
@@ -194,19 +189,17 @@ func DownloadPieceCmd(args []string) error {
 	desiredPeer := resp.peers[0]
 
 	// Open a connection to the peer
-	err = desiredPeer.Connect()
+	err = desiredPeer.Connect(file.Info.InfoHash)
 	if err != nil {
 		return err
 	}
 
 	defer desiredPeer.Close()
 
-	piece, err := desiredPeer.DownloadPiece(context.Background(), file, []byte("00112233445566778899"), pieceNum)
+	piece, err := desiredPeer.DownloadPiece(context.Background(), file, pieceNum)
 	if err != nil {
 		return err
 	}
-
-	fmt.Println("got piece !")
 
 	return os.WriteFile(*pieceFile, piece, 0755)
 }
@@ -229,22 +222,27 @@ func DownloadCmd(args []string) error {
 		return err
 	}
 
-	// TODO: to imporve this find which peer has which piece
-	// At this point all the peers contains all the pieces
-	desiredPeer := resp.peers[0]
+	// for _, peerInfo := range resp.peers {
 
-	// Open a connection to the peer
-	err = desiredPeer.Connect()
-	if err != nil {
-		return err
-	}
-
-	defer desiredPeer.Close()
+	// }
 
 	var fileContent []byte
 	for pieceIndex := range file.Info.PiecesHash {
 
-		piece, err := desiredPeer.DownloadPiece(context.Background(), file, []byte("00112233445566778899"), pieceIndex)
+		// TODO: improve this to get peers that has the piece and also not chocked!
+		peerIndex := pieceIndex % len(resp.peers)
+
+		fmt.Println("peerIndex", peerIndex)
+		desiredPeer := resp.peers[peerIndex]
+		// Open a connection to the peer
+		err = desiredPeer.Connect(file.Info.InfoHash)
+		if err != nil {
+			return fmt.Errorf("failed to connect to peer: %w", err)
+		}
+
+		defer desiredPeer.Close()
+
+		piece, err := desiredPeer.DownloadPiece(context.Background(), file, pieceIndex)
 		if err != nil {
 			return err
 		}
