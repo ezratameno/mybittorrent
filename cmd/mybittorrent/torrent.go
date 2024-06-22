@@ -219,10 +219,7 @@ func (tf *TorrentFile) DiscoverPeers(ctx context.Context) (*DiscoverPeersRespons
 		}
 		port := binary.BigEndian.Uint16([]byte(peers[i+4 : i+6]))
 
-		discoverResp.peers = append(discoverResp.peers, &Peer{
-			port:   port,
-			ipAddr: strings.TrimSuffix(buf.String(), "."),
-		})
+		discoverResp.peers = append(discoverResp.peers, NewPeer(port, strings.TrimSuffix(buf.String(), ".")))
 		i += 6
 	}
 

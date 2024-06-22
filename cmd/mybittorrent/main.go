@@ -222,17 +222,6 @@ func DownloadCmd(args []string) error {
 		return err
 	}
 
-	for i, peerInfo := range resp.peers {
-		err = peerInfo.Connect(file.Info.InfoHash)
-		if err != nil {
-			return fmt.Errorf("failed to connect to peer: %w", err)
-		}
-
-		fmt.Printf("peer %d, pieces: %+v\n", i, peerInfo.availablePiecesIndexes)
-	}
-
-	fmt.Println(file.Info.Length / file.Info.PieceLength)
-
 	var fileContent []byte
 	for pieceIndex := range file.Info.PiecesHash {
 
@@ -240,14 +229,15 @@ func DownloadCmd(args []string) error {
 		peerIndex := pieceIndex % len(resp.peers)
 
 		fmt.Println("peerIndex", peerIndex)
-		desiredPeer := resp.peers[peerIndex]
-		// Open a connection to the peer
-		// err = desiredPeer.Connect(file.Info.InfoHash)
-		// if err != nil {
-		// 	return fmt.Errorf("failed to connect to peer: %w", err)
-		// }
+		desiredPeer := resp.peers[1]
 
-		// defer desiredPeer.Close()
+		// Open a connection to the peer
+		err = desiredPeer.Connect(file.Info.InfoHash)
+		if err != nil {
+			return fmt.Errorf("failed to connect to peer: %w", err)
+		}
+
+		defer desiredPeer.Close()
 
 		piece, err := desiredPeer.DownloadPiece(context.Background(), file, pieceIndex)
 		if err != nil {

@@ -9,10 +9,14 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"time"
+	"sync"
 )
 
 type Peer struct {
+	// make sure we don't write and read at the same time
+
+	sync.Once
+
 	port   uint16
 	ipAddr string
 	conn   net.Conn
@@ -21,7 +25,27 @@ type Peer struct {
 
 	availablePiecesIndexes []int
 
+	// If the peer is choked then we can't request any pieces from him
+	chocked bool
+
+	unChokedChan chan struct{}
+
 	// TODO: add chan that we pass the messages through him
+	msgChan      chan []byte
+	pieceMsgChan chan []byte
+
+	lock sync.Mutex
+}
+
+func NewPeer(port uint16, ipAddr string) *Peer {
+	return &Peer{
+		port:         port,
+		ipAddr:       ipAddr,
+		msgChan:      make(chan []byte),
+		unChokedChan: make(chan struct{}),
+		pieceMsgChan: make(chan []byte),
+		lock:         sync.Mutex{},
+	}
 }
 
 const (
@@ -44,21 +68,10 @@ func (p *Peer) Connect(infoHash []byte) error {
 		return err
 	}
 
-	// after handshake the peer will send a bitfield message telling us which pieces he has
-	buf := make([]byte, 1024)
-	size, err := p.conn.Read(buf)
-	if err != nil {
-		return fmt.Errorf("failed to read bitfield message: %w", err)
-	}
+	go p.handleConnection()
 
-	buf = buf[:size]
+	go p.handleMessage()
 
-	piecesBinRep := fmt.Sprintf("%b", buf[5:])
-	for i, pieceIndex := range piecesBinRep {
-		if pieceIndex == '1' {
-			p.availablePiecesIndexes = append(p.availablePiecesIndexes, i)
-		}
-	}
 	return nil
 }
 
@@ -150,7 +163,15 @@ func (p *Peer) Handshake(ctx context.Context, infoHash []byte, peerID []byte) (*
 
 func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, pieceIndex int) ([]byte, error) {
 
-	piece, err := p.handleDownloadPiece(file, pieceIndex)
+	// Send interested message to start
+	_, err := p.Write([]byte{0, 0, 0, 1, messageIDInterested})
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Println("sent interested message")
+
+	piece, err := p.downloadPiece(file, pieceIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -182,138 +203,214 @@ func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, pieceIndex 
 
 }
 
-func (p *Peer) handleDownloadPiece(file *TorrentFile, pieceIndex int) ([]byte, error) {
-
-	// Send interested message to start
-	_, err := p.conn.Write([]byte{0, 0, 0, 1, messageIDInterested})
-	if err != nil {
-		return nil, err
-	}
-
-	fmt.Println("sent interested message")
-
+func (p *Peer) handleConnection() error {
 	buf := make([]byte, blockSize*5)
 
-	var piece []byte
 	for {
 
-		size, err := p.conn.Read(buf)
+		size, err := p.Read(buf)
 		if err != nil {
 			// Connection was closed
 			if errors.Is(err, io.EOF) {
 
 				fmt.Println("eof")
-				return nil, nil
+				return nil
 			}
 
-			return nil, err
+			return err
 		}
 
-		content := buf[:size]
+		fmt.Println("size", size)
+		msg := buf[:size]
 
-		fmt.Println("content:", content)
+		p.msgChan <- msg
+	}
+}
 
-		// http://www.kristenwidman.com/blog/71/how-to-write-a-bittorrent-client-part-2/#:~:text=Bitfield%20messages%20are%20optional%20and,pieces%20that%20a%20peer%20has.
-		// Can be because of the choke message
-		if len(content) < 5 {
-			continue
+func (p *Peer) handleMessage() error {
+	for {
+
+		msg := <-p.msgChan
+
+		if len(msg) < 5 {
+
+			// If len is 4, then it's a keep alive message
+			// It serves to maintain active connections by signaling that the connection is still alive and should remain open.
+			fmt.Println("msg:", msg)
+			return fmt.Errorf("message in wrong format, expected len at least 5, %s", msg)
 		}
 
-		switch messageID := content[4]; messageID {
+		msgID := msg[4]
+
+		switch msgID {
+
+		case messageIDChoke:
+			fmt.Println("msg choke")
+			p.chocked = true
 
 		case messageIDUnchoke:
+			fmt.Println("msg unchoke")
+			p.chocked = false
+			p.unChokedChan <- struct{}{}
 
-			// Break the piece into blocks of 16 kiB (16 * 1024 bytes) and send a request message for each block
+		case messageIDInterested:
+			fmt.Println("msg Interested")
 
-			fmt.Println("unchoke")
+		case messageIDNotInterested:
+			fmt.Println("msg NotInterested")
 
-			// This piece can be the last piece in the file
-			// so the piece length can be less the the standard piece length
+		case messageIDHave:
+			fmt.Println("msg Have")
 
-			pieceLen := file.Info.PieceLength
+			// get all the pieces that the peer has
+		case messageIDBitfield:
+			fmt.Println("msg Bitfield")
 
-			if len(file.Info.PiecesHash)-1 == pieceIndex {
-				pieceLen = file.Info.Length % file.Info.PieceLength
+			err := p.handleBitfieldMessage(msg)
+			if err != nil {
+				return fmt.Errorf("failed to handle bitfield message: %w", err)
 			}
-			numBlocks := pieceLen / blockSize
+		case messageIDRequest:
+			fmt.Println("msg Request")
 
-			// If the file has some part that is less then the standard block size
-			if pieceLen%blockSize != 0 {
-				numBlocks++
-			}
-			// fmt.Printf("num of blocks in a piece: %d\n", numBlocks)
-			// fmt.Println("piece length", pieceLen)
+		case messageIDPiece:
+			fmt.Println("msg Piece")
+			p.pieceMsgChan <- msg
 
-			for i := 0; i < int(numBlocks); i++ {
-
-				index := uint32(pieceIndex)
-				begin := uint32(i * blockSize)
-				length := uint32(blockSize)
-
-				// The length of the last piece can be less then the others
-				if i == int(numBlocks)-1 && pieceLen%blockSize != 0 {
-
-					// fmt.Println(`file.Info.PieceLength % blockSize:`, file.Info.PieceLength%blockSize)
-					length = uint32(pieceLen % blockSize)
-				}
-
-				// fmt.Printf("begin: %d, block num: %d\n", begin, i)
-				// fmt.Printf("length: %d, begin: %d, block num: %d\n", length, begin, i)
-
-				var request []byte
-
-				request = binary.BigEndian.AppendUint32(request, 13)
-				request = append(request, uint8(messageIDRequest))
-				request = binary.BigEndian.AppendUint32(request, index)
-				request = binary.BigEndian.AppendUint32(request, begin)
-				request = binary.BigEndian.AppendUint32(request, length)
-
-				// Send the request
-				_, err := p.conn.Write(request)
-				if err != nil {
-					return nil, fmt.Errorf("failed to write: %w", err)
-				}
-
-				// fmt.Printf("wrote: %d bytes\n", n)
-				// fmt.Println("wrote data", i)
-
-				// Read the response
-				resp := make([]byte, length+13)
-				var respSize int
-
-				err = withRetry(3, 1300*time.Millisecond, func() error {
-					respSize, err = io.ReadFull(p.conn, resp)
-					return err
-				})
-				if err != nil {
-					return nil, err
-				}
-
-				// fmt.Println("respSize", respSize)
-
-				resp = resp[:respSize]
-				// fmt.Println("resp:", resp)
-
-				// respIndex := binary.BigEndian.Uint32(resp[5:9])
-				// respBegin := binary.BigEndian.Uint32(resp[9:13])
-				respBlock := resp[13:]
-
-				// fmt.Println("resp Length", binary.BigEndian.Uint32(resp[:5]))
-				// fmt.Println("respIndex", respIndex)
-				// fmt.Println("respBegin", respBegin)
-
-				piece = append(piece, respBlock...)
-				// fmt.Println("respBlock", respBlock)
-			}
-
-			// Finish getting all the blocks of the pieces
-			return piece, nil
+		case messageIDCancel:
+			fmt.Println("msg Cancel")
 
 		default:
-			fmt.Println("size", size)
-			// fmt.Println("content", content)
-			fmt.Println("message id", content[4])
+			fmt.Println("unknown message")
 		}
 
 	}
+}
+
+// make sure we don't write and read at the same time
+func (p *Peer) Write(b []byte) (int, error) {
+	fmt.Println("try lock")
+
+	p.lock.Lock()
+	fmt.Println("locked")
+	defer p.lock.Unlock()
+
+	return p.conn.Write(b)
+}
+
+// make sure we don't write and read at the same time
+func (p *Peer) Read(b []byte) (int, error) {
+
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	return p.conn.Read(b)
+}
+func (p *Peer) downloadPiece(file *TorrentFile, pieceIndex int) ([]byte, error) {
+
+	// TODO: block until not choked
+
+	<-p.unChokedChan
+
+	fmt.Println("unchoke starting to download")
+
+	var completedPiece []byte
+	pieceLen := file.Info.PieceLength
+
+	if len(file.Info.PiecesHash)-1 == pieceIndex {
+		pieceLen = file.Info.Length % file.Info.PieceLength
+	}
+	numBlocks := pieceLen / blockSize
+
+	// If the file has some part that is less then the standard block size
+	if pieceLen%blockSize != 0 {
+		numBlocks++
+	}
+	// fmt.Printf("num of blocks in a piece: %d\n", numBlocks)
+	// fmt.Println("piece length", pieceLen)
+
+	for i := 0; i < int(numBlocks); i++ {
+
+		index := uint32(pieceIndex)
+		begin := uint32(i * blockSize)
+		length := uint32(blockSize)
+
+		// The length of the last piece can be less then the others
+		if i == int(numBlocks)-1 && pieceLen%blockSize != 0 {
+
+			// fmt.Println(`file.Info.PieceLength % blockSize:`, file.Info.PieceLength%blockSize)
+			length = uint32(pieceLen % blockSize)
+		}
+
+		// fmt.Printf("begin: %d, block num: %d\n", begin, i)
+		fmt.Printf("length: %d, begin: %d, block num: %d\n", length, begin, i)
+
+		var request []byte
+
+		request = binary.BigEndian.AppendUint32(request, 13)
+		request = append(request, uint8(messageIDRequest))
+		request = binary.BigEndian.AppendUint32(request, index)
+		request = binary.BigEndian.AppendUint32(request, begin)
+		request = binary.BigEndian.AppendUint32(request, length)
+
+		// Send the request
+
+		fmt.Println("trying to send request")
+		_, err := p.Write(request)
+		if err != nil {
+			return nil, fmt.Errorf("failed to write: %w", err)
+		}
+
+		fmt.Println("sent request message")
+
+		// fmt.Printf("wrote: %d bytes\n", n)
+		// fmt.Println("wrote data", i)
+
+		// Read the response
+		// resp := make([]byte, length+13)
+		// var respSize int
+
+		// err = withRetry(3, 1300*time.Millisecond, func() error {
+		// 	respSize, err = io.ReadFull(p.conn, resp)
+		// 	return err
+		// })
+		// if err != nil {
+		// 	return nil, err
+		// }
+
+		resp := <-p.pieceMsgChan
+
+		resp = resp[:length+13]
+
+		fmt.Println("got piece message")
+
+		// fmt.Println("respSize", respSize)
+
+		// resp = resp[:respSize]
+		// fmt.Println("resp:", resp)
+
+		// respIndex := binary.BigEndian.Uint32(resp[5:9])
+		// respBegin := binary.BigEndian.Uint32(resp[9:13])
+		respBlock := resp[13:]
+
+		// fmt.Println("resp Length", binary.BigEndian.Uint32(resp[:5]))
+		// fmt.Println("respIndex", respIndex)
+		// fmt.Println("respBegin", respBegin)
+
+		completedPiece = append(completedPiece, respBlock...)
+		// fmt.Println("respBlock", respBlock)
+	}
+
+	return completedPiece, nil
+}
+
+func (p *Peer) handleBitfieldMessage(msg []byte) error {
+
+	piecesBinRep := fmt.Sprintf("%b", msg[5:])
+	for i, pieceIndex := range piecesBinRep {
+		if pieceIndex == '1' {
+			p.availablePiecesIndexes = append(p.availablePiecesIndexes, i)
+		}
+	}
+	return nil
 }
