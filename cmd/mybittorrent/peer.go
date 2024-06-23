@@ -256,14 +256,6 @@ func (p *Peer) handleMessage() error {
 
 		msg := <-p.msgChan
 
-		if len(msg) < 5 {
-
-			// If len is 4, then it's a keep alive message
-			// It serves to maintain active connections by signaling that the connection is still alive and should remain open.
-			fmt.Println("msg:", msg)
-			return fmt.Errorf("message in wrong format, expected len at least 5, %s", msg)
-		}
-
 		msgID := msg[4]
 
 		switch msgID {
