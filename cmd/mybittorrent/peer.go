@@ -34,7 +34,7 @@ type Peer struct {
 	msgChan      chan []byte
 	pieceMsgChan chan []byte
 
-	lock sync.Mutex
+	// lock sync.Mutex
 }
 
 func NewPeer(port uint16, ipAddr string) *Peer {
@@ -44,7 +44,7 @@ func NewPeer(port uint16, ipAddr string) *Peer {
 		msgChan:      make(chan []byte),
 		unChokedChan: make(chan struct{}),
 		pieceMsgChan: make(chan []byte),
-		lock:         sync.Mutex{},
+		// lock:         sync.Mutex{},
 	}
 }
 
@@ -204,7 +204,7 @@ func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, pieceIndex 
 }
 
 func (p *Peer) handleConnection() error {
-	buf := make([]byte, blockSize*5)
+	buf := make([]byte, blockSize+13)
 
 	for {
 
@@ -220,7 +220,7 @@ func (p *Peer) handleConnection() error {
 			return err
 		}
 
-		fmt.Println("size", size)
+		fmt.Println("message size", size)
 		msg := buf[:size]
 
 		p.msgChan <- msg
@@ -289,11 +289,11 @@ func (p *Peer) handleMessage() error {
 
 // make sure we don't write and read at the same time
 func (p *Peer) Write(b []byte) (int, error) {
-	fmt.Println("try lock")
+	// fmt.Println("try lock")
 
-	p.lock.Lock()
-	fmt.Println("locked")
-	defer p.lock.Unlock()
+	// p.lock.Lock()
+	// fmt.Println("locked")
+	// defer p.lock.Unlock()
 
 	return p.conn.Write(b)
 }
@@ -301,8 +301,8 @@ func (p *Peer) Write(b []byte) (int, error) {
 // make sure we don't write and read at the same time
 func (p *Peer) Read(b []byte) (int, error) {
 
-	p.lock.Lock()
-	defer p.lock.Unlock()
+	// p.lock.Lock()
+	// defer p.lock.Unlock()
 
 	return p.conn.Read(b)
 }
@@ -380,7 +380,7 @@ func (p *Peer) downloadPiece(file *TorrentFile, pieceIndex int) ([]byte, error) 
 
 		resp := <-p.pieceMsgChan
 
-		resp = resp[:length+13]
+		// resp = resp[:length+13]
 
 		fmt.Println("got piece message")
 
