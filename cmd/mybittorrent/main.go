@@ -244,6 +244,8 @@ func DownloadCmd(args []string) error {
 			return err
 		}
 
+		fmt.Println("downloaded piece:", pieceIndex)
+
 		fileContent = append(fileContent, piece...)
 	}
 

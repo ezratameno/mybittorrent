@@ -33,8 +33,6 @@ type Peer struct {
 	// TODO: add chan that we pass the messages through him
 	msgChan      chan []byte
 	pieceMsgChan chan []byte
-
-	// lock sync.Mutex
 }
 
 func NewPeer(port uint16, ipAddr string) *Peer {
@@ -164,7 +162,7 @@ func (p *Peer) Handshake(ctx context.Context, infoHash []byte, peerID []byte) (*
 func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, pieceIndex int) ([]byte, error) {
 
 	// Send interested message to start
-	_, err := p.Write([]byte{0, 0, 0, 1, messageIDInterested})
+	_, err := p.conn.Write([]byte{0, 0, 0, 1, messageIDInterested})
 	if err != nil {
 		return nil, err
 	}
@@ -204,24 +202,50 @@ func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, pieceIndex 
 }
 
 func (p *Peer) handleConnection() error {
-	buf := make([]byte, blockSize+13)
+	buf := make([]byte, 5)
 
 	for {
 
-		size, err := p.Read(buf)
+		// Read the first 5 bytes to get the size and message id
+
+		size, err := p.conn.Read(buf)
 		if err != nil {
 			// Connection was closed
 			if errors.Is(err, io.EOF) {
-
 				fmt.Println("eof")
 				return nil
 			}
 
 			return err
 		}
+		buf = buf[:size]
 
-		fmt.Println("message size", size)
-		msg := buf[:size]
+		// Keep alive
+		if len(buf) < 5 {
+			continue
+		}
+
+		messageSize := binary.BigEndian.Uint32(buf[:4])
+		messageID := buf[4]
+
+		fmt.Println("message size", messageSize)
+		fmt.Println("message id", messageID)
+
+		msg := buf
+
+		// According to the message type (not all messages have a payload)
+
+		if messageSize > 0 {
+			payloadBuf := make([]byte, messageSize)
+			_, err = io.ReadFull(p.conn, payloadBuf)
+			if err != nil {
+				return fmt.Errorf("failed to read payload")
+			}
+			msg = append(msg, payloadBuf...)
+
+		}
+
+		fmt.Println("msg", msg)
 
 		p.msgChan <- msg
 	}
@@ -287,25 +311,6 @@ func (p *Peer) handleMessage() error {
 	}
 }
 
-// make sure we don't write and read at the same time
-func (p *Peer) Write(b []byte) (int, error) {
-	// fmt.Println("try lock")
-
-	// p.lock.Lock()
-	// fmt.Println("locked")
-	// defer p.lock.Unlock()
-
-	return p.conn.Write(b)
-}
-
-// make sure we don't write and read at the same time
-func (p *Peer) Read(b []byte) (int, error) {
-
-	// p.lock.Lock()
-	// defer p.lock.Unlock()
-
-	return p.conn.Read(b)
-}
 func (p *Peer) downloadPiece(file *TorrentFile, pieceIndex int) ([]byte, error) {
 
 	// TODO: block until not choked
@@ -326,8 +331,8 @@ func (p *Peer) downloadPiece(file *TorrentFile, pieceIndex int) ([]byte, error) 
 	if pieceLen%blockSize != 0 {
 		numBlocks++
 	}
-	// fmt.Printf("num of blocks in a piece: %d\n", numBlocks)
-	// fmt.Println("piece length", pieceLen)
+	fmt.Printf("num of blocks in a piece: %d\n", numBlocks)
+	fmt.Println("piece length", pieceLen)
 
 	for i := 0; i < int(numBlocks); i++ {
 
@@ -356,31 +361,18 @@ func (p *Peer) downloadPiece(file *TorrentFile, pieceIndex int) ([]byte, error) 
 		// Send the request
 
 		fmt.Println("trying to send request")
-		_, err := p.Write(request)
+		_, err := p.conn.Write(request)
 		if err != nil {
 			return nil, fmt.Errorf("failed to write: %w", err)
 		}
 
 		fmt.Println("sent request message")
 
-		// fmt.Printf("wrote: %d bytes\n", n)
-		// fmt.Println("wrote data", i)
-
 		// Read the response
-		// resp := make([]byte, length+13)
-		// var respSize int
-
-		// err = withRetry(3, 1300*time.Millisecond, func() error {
-		// 	respSize, err = io.ReadFull(p.conn, resp)
-		// 	return err
-		// })
-		// if err != nil {
-		// 	return nil, err
-		// }
 
 		resp := <-p.pieceMsgChan
 
-		// resp = resp[:length+13]
+		resp = resp[:length+13]
 
 		fmt.Println("got piece message")
 
@@ -412,5 +404,7 @@ func (p *Peer) handleBitfieldMessage(msg []byte) error {
 			p.availablePiecesIndexes = append(p.availablePiecesIndexes, i)
 		}
 	}
+
+	fmt.Printf("availablePiecesIndexes: %+v\n", p.availablePiecesIndexes)
 	return nil
 }
