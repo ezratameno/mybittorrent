@@ -222,12 +222,7 @@ func DownloadCmd(args []string) error {
 		return err
 	}
 
-	var fileContent []byte
-
-	// TODO: improve this to get peers that has the piece and also not chocked!
-	pieceIndex := 0
-
-	desiredPeer := resp.peers[0]
+	desiredPeer := resp.peers[1]
 
 	// Open a connection to the peer
 	err = desiredPeer.Connect(file.Info.InfoHash)
@@ -237,14 +232,26 @@ func DownloadCmd(args []string) error {
 
 	defer desiredPeer.Close()
 
-	piece, err := desiredPeer.DownloadPiece(context.Background(), file, 1)
+	fmt.Println("pieces len:", len(file.Info.Pieces))
+	pieces := make([]byte, 0, file.Info.Length)
+	for pieceIndex := range file.Info.PiecesHash {
+		piece, err := desiredPeer.DownloadPiece(context.Background(), file, pieceIndex)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println("downloaded piece:", pieceIndex)
+
+		pieces = append(pieces, piece...)
+
+	}
+
+	err = os.WriteFile(*pathToFile, pieces, 0755)
 	if err != nil {
 		return err
 	}
 
-	fmt.Println("downloaded piece:", pieceIndex)
+	fmt.Println("Save torrent file:", *pathToFile)
 
-	fileContent = append(fileContent, piece...)
-
-	return os.WriteFile(*pathToFile, fileContent, 0755)
+	return nil
 }

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 )
 
 type Peer struct {
@@ -28,7 +29,10 @@ type Peer struct {
 	// If the peer is choked then we can't request any pieces from him
 	chockedCh chan struct{}
 
-	unChokedChan chan struct{}
+	unChokedCh chan struct{}
+
+	// If we are unchoked then we can download from the peer
+	choked bool
 
 	// TODO: add chan that we pass the messages through him
 	msgChan chan []byte
@@ -49,8 +53,8 @@ func NewPeer(port uint16, ipAddr string) *Peer {
 		port:                port,
 		ipAddr:              ipAddr,
 		msgChan:             make(chan []byte),
-		unChokedChan:        make(chan struct{}),
 		chockedCh:           make(chan struct{}),
+		unChokedCh:          make(chan struct{}),
 		pieceMsgChan:        make(chan []byte),
 		downloadedPieceChan: make(chan downloadPieceChan),
 		// lock:         sync.Mutex{},
@@ -81,7 +85,13 @@ func (p *Peer) Connect(infoHash []byte) error {
 
 	go p.handleMessage()
 
-	return nil
+	select {
+	case <-p.unChokedCh:
+		return nil
+	case <-time.After(3 * time.Second):
+		return fmt.Errorf("timed out to receive unchoke message")
+	}
+
 }
 
 func (p *Peer) Close() error {
@@ -172,6 +182,16 @@ func (p *Peer) Handshake(ctx context.Context, infoHash []byte, peerID []byte) (*
 
 func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, pieceIndex int) ([]byte, error) {
 
+	// // Then it's not the first time, we need to send an interested message
+	// if len(p.availablePiecesIndexes) > 0 {
+	// 	// Send interested message to start
+	// 	_, err := p.conn.Write([]byte{0, 0, 0, 1, messageIDInterested})
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+
+	// 	fmt.Println("sent interested message")
+	// }
 	// send in the background
 	go p.downloadPiece(file, pieceIndex)
 
@@ -214,7 +234,6 @@ func (p *Peer) handleConnection() error {
 	for {
 
 		// Read the first 5 bytes to get the size and message id
-		fmt.Println("before read")
 
 		size, err := p.conn.Read(buf)
 		if err != nil {
@@ -228,21 +247,15 @@ func (p *Peer) handleConnection() error {
 		}
 		buf = buf[:size]
 
-		fmt.Println("buf", buf)
-
 		// Keep alive
 		if len(buf) < 5 {
 			continue
 		}
 
 		messageSize := binary.BigEndian.Uint32(buf[:4])
-		messageID := buf[4]
 
 		// Because we read the message ID already
 		messageSize = messageSize - 1
-
-		fmt.Println("message size", messageSize)
-		fmt.Println("message id", messageID)
 
 		msg := buf
 
@@ -256,11 +269,7 @@ func (p *Peer) handleConnection() error {
 			}
 			msg = append(msg, payloadBuf...)
 
-			fmt.Println("read payload", payloadBuf)
-
 		}
-
-		fmt.Println("msg", msg)
 
 		p.msgChan <- msg
 	}
@@ -278,10 +287,13 @@ func (p *Peer) handleMessage() error {
 		case messageIDChoke:
 			fmt.Println("msg choke")
 			p.chockedCh <- struct{}{}
+			p.choked = true
 
 		case messageIDUnchoke:
+
 			fmt.Println("msg unchoke")
-			p.unChokedChan <- struct{}{}
+			p.choked = false
+			p.unChokedCh <- struct{}{}
 
 		case messageIDInterested:
 			fmt.Println("msg Interested")
@@ -320,17 +332,22 @@ func (p *Peer) handleMessage() error {
 func (p *Peer) downloadPiece(file *TorrentFile, pieceIndex int) {
 
 	// TODO: block until not choked
-
-	<-p.unChokedChan
+	// Wait X time
+	// if p.choked {
+	// 	p.downloadedPieceChan <- downloadPieceChan{
+	// 		err: fmt.Errorf("trying to download while choked"),
+	// 	}
+	// }
 
 	fmt.Println("unchoke starting to download")
 
-	var completedPiece []byte
 	pieceLen := file.Info.PieceLength
 
 	if len(file.Info.PiecesHash)-1 == pieceIndex {
 		pieceLen = file.Info.Length % file.Info.PieceLength
 	}
+	var completedPiece []byte
+
 	numBlocks := pieceLen / blockSize
 
 	// If the file has some part that is less then the standard block size
@@ -405,7 +422,6 @@ func (p *Peer) downloadPiece(file *TorrentFile, pieceIndex int) {
 	p.downloadedPieceChan <- downloadPieceChan{
 		content: completedPiece,
 	}
-	return
 
 }
 
