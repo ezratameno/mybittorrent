@@ -229,7 +229,7 @@ func DownloadCmd(args []string) error {
 		peerIndex := pieceIndex % len(resp.peers)
 
 		fmt.Println("peerIndex", peerIndex)
-		desiredPeer := resp.peers[1]
+		desiredPeer := resp.peers[0]
 
 		// Open a connection to the peer
 		err = desiredPeer.Connect(file.Info.InfoHash)
@@ -239,7 +239,7 @@ func DownloadCmd(args []string) error {
 
 		defer desiredPeer.Close()
 
-		piece, err := desiredPeer.DownloadPiece(context.Background(), file, pieceIndex)
+		piece, err := desiredPeer.DownloadPiece(context.Background(), file, 1)
 		if err != nil {
 			return err
 		}

@@ -26,22 +26,33 @@ type Peer struct {
 	availablePiecesIndexes []int
 
 	// If the peer is choked then we can't request any pieces from him
-	chocked bool
+	chockedCh chan struct{}
 
 	unChokedChan chan struct{}
 
 	// TODO: add chan that we pass the messages through him
-	msgChan      chan []byte
+	msgChan chan []byte
+
+	// Pass piece messages from the peer
 	pieceMsgChan chan []byte
+
+	downloadedPieceChan chan downloadPieceChan
+}
+
+type downloadPieceChan struct {
+	content []byte
+	err     error
 }
 
 func NewPeer(port uint16, ipAddr string) *Peer {
 	return &Peer{
-		port:         port,
-		ipAddr:       ipAddr,
-		msgChan:      make(chan []byte),
-		unChokedChan: make(chan struct{}),
-		pieceMsgChan: make(chan []byte),
+		port:                port,
+		ipAddr:              ipAddr,
+		msgChan:             make(chan []byte),
+		unChokedChan:        make(chan struct{}),
+		chockedCh:           make(chan struct{}),
+		pieceMsgChan:        make(chan []byte),
+		downloadedPieceChan: make(chan downloadPieceChan),
 		// lock:         sync.Mutex{},
 	}
 }
@@ -169,35 +180,39 @@ func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, pieceIndex 
 
 	fmt.Println("sent interested message")
 
-	piece, err := p.downloadPiece(file, pieceIndex)
-	if err != nil {
-		return nil, err
+	// send in the background
+	go p.downloadPiece(file, pieceIndex)
+
+	// wait for the choke message or the piece to be downloaded
+	select {
+	case <-p.chockedCh:
+		return nil, fmt.Errorf("peer %s:%d is choked", p.ipAddr, p.port)
+
+	case pieceRes := <-p.downloadedPieceChan:
+		if pieceRes.err != nil {
+			return nil, pieceRes.err
+		}
+
+		// validate the hash of the piece
+
+		expectedPieceHash := file.Info.PiecesHash[pieceIndex]
+
+		hash := sha1.New()
+
+		_, err = hash.Write(pieceRes.content)
+		if err != nil {
+			return nil, err
+		}
+
+		pieceHash := fmt.Sprintf("%x", hash.Sum(nil))
+
+		if pieceHash != expectedPieceHash {
+			return nil, errors.New("piece hash doesn't match expected hash")
+		}
+
+		return pieceRes.content, nil
+
 	}
-
-	// validate the hash of the piece
-
-	expectedPieceHash := file.Info.PiecesHash[pieceIndex]
-
-	fmt.Printf("expectedPieceHash: %s, piece index: %d\n", expectedPieceHash, pieceIndex)
-
-	hash := sha1.New()
-
-	_, err = hash.Write(piece)
-	if err != nil {
-		return nil, err
-	}
-
-	pieceHash := fmt.Sprintf("%x", hash.Sum(nil))
-
-	// fmt.Println("pieceHash", pieceHash)
-
-	// fmt.Println("piece len", len(piece))
-
-	if pieceHash != expectedPieceHash {
-		return nil, errors.New("piece hash doesn't match expected hash")
-	}
-
-	return piece, nil
 
 }
 
@@ -207,6 +222,7 @@ func (p *Peer) handleConnection() error {
 	for {
 
 		// Read the first 5 bytes to get the size and message id
+		fmt.Println("before read")
 
 		size, err := p.conn.Read(buf)
 		if err != nil {
@@ -219,6 +235,8 @@ func (p *Peer) handleConnection() error {
 			return err
 		}
 		buf = buf[:size]
+
+		fmt.Println("buf", buf)
 
 		// Keep alive
 		if len(buf) < 5 {
@@ -233,8 +251,7 @@ func (p *Peer) handleConnection() error {
 
 		msg := buf
 
-		// According to the message type (not all messages have a payload)
-
+		// Read the payload if exist
 		if messageSize > 0 {
 			payloadBuf := make([]byte, messageSize)
 			_, err = io.ReadFull(p.conn, payloadBuf)
@@ -262,11 +279,10 @@ func (p *Peer) handleMessage() error {
 
 		case messageIDChoke:
 			fmt.Println("msg choke")
-			p.chocked = true
+			p.chockedCh <- struct{}{}
 
 		case messageIDUnchoke:
 			fmt.Println("msg unchoke")
-			p.chocked = false
 			p.unChokedChan <- struct{}{}
 
 		case messageIDInterested:
@@ -303,7 +319,7 @@ func (p *Peer) handleMessage() error {
 	}
 }
 
-func (p *Peer) downloadPiece(file *TorrentFile, pieceIndex int) ([]byte, error) {
+func (p *Peer) downloadPiece(file *TorrentFile, pieceIndex int) {
 
 	// TODO: block until not choked
 
@@ -355,7 +371,10 @@ func (p *Peer) downloadPiece(file *TorrentFile, pieceIndex int) ([]byte, error) 
 		fmt.Println("trying to send request")
 		_, err := p.conn.Write(request)
 		if err != nil {
-			return nil, fmt.Errorf("failed to write: %w", err)
+			p.downloadedPieceChan <- downloadPieceChan{
+				err: fmt.Errorf("failed to write: %w", err),
+			}
+			return
 		}
 
 		fmt.Println("sent request message")
@@ -385,7 +404,11 @@ func (p *Peer) downloadPiece(file *TorrentFile, pieceIndex int) ([]byte, error) 
 		// fmt.Println("respBlock", respBlock)
 	}
 
-	return completedPiece, nil
+	p.downloadedPieceChan <- downloadPieceChan{
+		content: completedPiece,
+	}
+	return
+
 }
 
 func (p *Peer) handleBitfieldMessage(msg []byte) error {
