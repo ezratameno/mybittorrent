@@ -172,14 +172,6 @@ func (p *Peer) Handshake(ctx context.Context, infoHash []byte, peerID []byte) (*
 
 func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, pieceIndex int) ([]byte, error) {
 
-	// Send interested message to start
-	_, err := p.conn.Write([]byte{0, 0, 0, 1, messageIDInterested})
-	if err != nil {
-		return nil, err
-	}
-
-	fmt.Println("sent interested message")
-
 	// send in the background
 	go p.downloadPiece(file, pieceIndex)
 
@@ -199,7 +191,7 @@ func (p *Peer) DownloadPiece(ctx context.Context, file *TorrentFile, pieceIndex 
 
 		hash := sha1.New()
 
-		_, err = hash.Write(pieceRes.content)
+		_, err := hash.Write(pieceRes.content)
 		if err != nil {
 			return nil, err
 		}
@@ -246,6 +238,9 @@ func (p *Peer) handleConnection() error {
 		messageSize := binary.BigEndian.Uint32(buf[:4])
 		messageID := buf[4]
 
+		// Because we read the message ID already
+		messageSize = messageSize - 1
+
 		fmt.Println("message size", messageSize)
 		fmt.Println("message id", messageID)
 
@@ -254,11 +249,14 @@ func (p *Peer) handleConnection() error {
 		// Read the payload if exist
 		if messageSize > 0 {
 			payloadBuf := make([]byte, messageSize)
+
 			_, err = io.ReadFull(p.conn, payloadBuf)
 			if err != nil {
 				return fmt.Errorf("failed to read payload")
 			}
 			msg = append(msg, payloadBuf...)
+
+			fmt.Println("read payload", payloadBuf)
 
 		}
 
@@ -421,5 +419,12 @@ func (p *Peer) handleBitfieldMessage(msg []byte) error {
 	}
 
 	fmt.Printf("availablePiecesIndexes: %+v\n", p.availablePiecesIndexes)
+	// Send interested message to start
+	_, err := p.conn.Write([]byte{0, 0, 0, 1, messageIDInterested})
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("sent interested message")
 	return nil
 }

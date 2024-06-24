@@ -223,31 +223,28 @@ func DownloadCmd(args []string) error {
 	}
 
 	var fileContent []byte
-	for pieceIndex := range file.Info.PiecesHash {
 
-		// TODO: improve this to get peers that has the piece and also not chocked!
-		peerIndex := pieceIndex % len(resp.peers)
+	// TODO: improve this to get peers that has the piece and also not chocked!
+	pieceIndex := 0
 
-		fmt.Println("peerIndex", peerIndex)
-		desiredPeer := resp.peers[0]
+	desiredPeer := resp.peers[0]
 
-		// Open a connection to the peer
-		err = desiredPeer.Connect(file.Info.InfoHash)
-		if err != nil {
-			return fmt.Errorf("failed to connect to peer: %w", err)
-		}
-
-		defer desiredPeer.Close()
-
-		piece, err := desiredPeer.DownloadPiece(context.Background(), file, 1)
-		if err != nil {
-			return err
-		}
-
-		fmt.Println("downloaded piece:", pieceIndex)
-
-		fileContent = append(fileContent, piece...)
+	// Open a connection to the peer
+	err = desiredPeer.Connect(file.Info.InfoHash)
+	if err != nil {
+		return fmt.Errorf("failed to connect to peer: %w", err)
 	}
+
+	defer desiredPeer.Close()
+
+	piece, err := desiredPeer.DownloadPiece(context.Background(), file, 1)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("downloaded piece:", pieceIndex)
+
+	fileContent = append(fileContent, piece...)
 
 	return os.WriteFile(*pathToFile, fileContent, 0755)
 }
